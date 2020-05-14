@@ -25,6 +25,9 @@ use crate::{
     INTERNAL_ERROR_MSG,
 };
 
+#[cfg(feature = "yaml")]
+use yaml_rust::Yaml;
+
 type Validator = Rc<dyn Fn(&str) -> Result<(), String>>;
 type ValidatorOs = Rc<dyn Fn(&OsStr) -> Result<(), String>>;
 
@@ -57,28 +60,29 @@ pub struct Arg<'help> {
     pub(crate) name: &'help str,
     pub(crate) about: Option<&'help str>,
     pub(crate) long_about: Option<&'help str>,
-    pub(crate) blacklist: Option<Vec<Id>>,
+    pub(crate) blacklist: Vec<Id>,
     pub(crate) settings: ArgFlags,
-    pub(crate) overrides: Option<Vec<Id>>,
-    pub(crate) groups: Option<Vec<Id>>,
-    pub(crate) requires: Option<Vec<(Option<&'help str>, Id)>>,
-    pub(crate) r_ifs: Option<Vec<(Id, &'help str)>>,
-    pub(crate) r_unless: Option<Vec<Id>>,
+    pub(crate) overrides: Vec<Id>,
+    pub(crate) groups: Vec<Id>,
+    pub(crate) requires: Vec<(Option<&'help str>, Id)>,
+    pub(crate) r_ifs: Vec<(Id, &'help str)>,
+    pub(crate) r_unless: Vec<Id>,
     pub(crate) short: Option<char>,
     pub(crate) long: Option<&'help str>,
-    pub(crate) aliases: Option<Vec<(&'help str, bool)>>, // (name, visible)
+    pub(crate) aliases: Vec<(&'help str, bool)>, // (name, visible)
+    pub(crate) short_aliases: Vec<(char, bool)>, // (name, visible)
     pub(crate) disp_ord: usize,
     pub(crate) unified_ord: usize,
-    pub(crate) possible_vals: Option<Vec<&'help str>>,
-    pub(crate) val_names: Option<VecMap<&'help str>>,
+    pub(crate) possible_vals: Vec<&'help str>,
+    pub(crate) val_names: VecMap<&'help str>,
     pub(crate) num_vals: Option<u64>,
     pub(crate) max_vals: Option<u64>,
     pub(crate) min_vals: Option<u64>,
     pub(crate) validator: Option<Validator>,
     pub(crate) validator_os: Option<ValidatorOs>,
     pub(crate) val_delim: Option<char>,
-    pub(crate) default_vals: Option<Vec<&'help OsStr>>,
-    pub(crate) default_vals_ifs: Option<VecMap<(Id, Option<&'help OsStr>, &'help OsStr)>>,
+    pub(crate) default_vals: Vec<&'help OsStr>,
+    pub(crate) default_vals_ifs: VecMap<(Id, Option<&'help OsStr>, &'help OsStr)>,
     pub(crate) env: Option<(&'help OsStr, Option<OsString>)>,
     pub(crate) terminator: Option<&'help str>,
     pub(crate) index: Option<u64>,
@@ -122,7 +126,11 @@ impl<'help> Arg<'help> {
     /// Get the list of the possible values for this argument, if any
     #[inline]
     pub fn get_possible_values(&self) -> Option<&[&str]> {
-        self.possible_vals.as_deref()
+        if self.possible_vals.is_empty() {
+            None
+        } else {
+            Some(&self.possible_vals)
+        }
     }
 
     /// Get the index of this argument, if any
@@ -169,85 +177,6 @@ impl<'help> Arg<'help> {
             unified_ord: 999,
             ..Default::default()
         }
-    }
-
-    /// Creates a new instance of [`Arg`] from a .yml (YAML) file.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use clap::{Arg, load_yaml};
-    /// let yml = load_yaml!("arg.yml");
-    /// let arg = Arg::from_yaml(yml);
-    /// ```
-    /// [`Arg`]: ./struct.Arg.html
-    #[cfg(feature = "yaml")]
-    #[allow(clippy::cognitive_complexity)]
-    pub fn from_yaml(y: &yaml_rust::yaml::Hash) -> Arg {
-        // We WANT this to panic on error...so expect() is good.
-        let name_yml = y.keys().next().unwrap();
-        let name_str = name_yml.as_str().unwrap();
-        let mut a = Arg::with_name(name_str);
-        let arg_settings = y.get(name_yml).unwrap().as_hash().unwrap();
-
-        for (k, v) in arg_settings.iter() {
-            a = match k.as_str().unwrap() {
-                "short" => yaml_to_char!(a, v, short),
-                "long" => yaml_to_str!(a, v, long),
-                "aliases" => yaml_vec_or_str!(v, a, alias),
-                "about" => yaml_to_str!(a, v, about),
-                "long_about" => yaml_to_str!(a, v, long_about),
-                "help" => yaml_to_str!(a, v, about),
-                "long_help" => yaml_to_str!(a, v, long_about),
-                "required" => yaml_to_bool!(a, v, required),
-                "required_if" => yaml_tuple2!(a, v, required_if),
-                "required_ifs" => yaml_tuple2!(a, v, required_if),
-                "takes_value" => yaml_to_bool!(a, v, takes_value),
-                "index" => yaml_to_u64!(a, v, index),
-                "global" => yaml_to_bool!(a, v, global),
-                "multiple" => yaml_to_bool!(a, v, multiple),
-                "hidden" => yaml_to_bool!(a, v, hidden),
-                "next_line_help" => yaml_to_bool!(a, v, next_line_help),
-                "group" => yaml_to_str!(a, v, group),
-                "number_of_values" => yaml_to_u64!(a, v, number_of_values),
-                "max_values" => yaml_to_u64!(a, v, max_values),
-                "min_values" => yaml_to_u64!(a, v, min_values),
-                "value_name" => yaml_to_str!(a, v, value_name),
-                "use_delimiter" => yaml_to_bool!(a, v, use_delimiter),
-                "allow_hyphen_values" => yaml_to_bool!(a, v, allow_hyphen_values),
-                "require_equals" => yaml_to_bool!(a, v, require_equals),
-                "require_delimiter" => yaml_to_bool!(a, v, require_delimiter),
-                "value_delimiter" => yaml_to_str!(a, v, value_delimiter),
-                "required_unless" => yaml_to_str!(a, v, required_unless),
-                "display_order" => yaml_to_usize!(a, v, display_order),
-                "default_value" => yaml_to_str!(a, v, default_value),
-                "default_value_if" => yaml_tuple3!(a, v, default_value_if),
-                "default_value_ifs" => yaml_tuple3!(a, v, default_value_if),
-                "env" => yaml_to_str!(a, v, env),
-                "value_names" => yaml_vec_or_str!(v, a, value_name),
-                "groups" => yaml_vec_or_str!(v, a, group),
-                "requires" => yaml_vec_or_str!(v, a, requires),
-                "requires_if" => yaml_tuple2!(a, v, requires_if),
-                "requires_ifs" => yaml_tuple2!(a, v, requires_if),
-                "conflicts_with" => yaml_vec_or_str!(v, a, conflicts_with),
-                "exclusive" => yaml_to_bool!(a, v, exclusive),
-                "hide_default_value" => yaml_to_bool!(a, v, hide_default_value),
-                "overrides_with" => yaml_vec_or_str!(v, a, overrides_with),
-                "possible_values" => yaml_vec_or_str!(v, a, possible_value),
-                "required_unless_one" => yaml_vec_or_str!(v, a, required_unless),
-                "required_unless_all" => {
-                    a = yaml_vec_or_str!(v, a, required_unless);
-                    a.set_mut(ArgSettings::RequiredUnlessAll);
-                    a
-                }
-                s => panic!(
-                    "Unknown Arg setting '{}' in YAML file for arg '{}'",
-                    s, name_str
-                ),
-            }
-        }
-
-        a
     }
 
     /// Sets the short version of the argument without the preceding `-`.
@@ -356,11 +285,37 @@ impl<'help> Arg<'help> {
     /// ```
     /// [`Arg`]: ./struct.Arg.html
     pub fn alias<S: Into<&'help str>>(mut self, name: S) -> Self {
-        if let Some(ref mut als) = self.aliases {
-            als.push((name.into(), false));
-        } else {
-            self.aliases = Some(vec![(name.into(), false)]);
+        self.aliases.push((name.into(), false));
+        self
+    }
+
+    /// Allows adding a [`Arg`] alias, which function as "hidden" arguments that
+    /// automatically dispatch as if this argument was used. This is more efficient, and easier
+    /// than creating multiple hidden arguments as one only needs to check for the existence of
+    /// this command, and not all variants.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use clap::{App, Arg};
+    /// let m = App::new("prog")
+    ///             .arg(Arg::with_name("test")
+    ///             .short('t')
+    ///             .short_alias('e')
+    ///             .takes_value(true))
+    ///        .get_matches_from(vec![
+    ///             "prog", "-e", "cool"
+    ///         ]);
+    /// assert!(m.is_present("test"));
+    /// assert_eq!(m.value_of("test"), Some("cool"));
+    /// ```
+    /// [`Arg`]: ./struct.Arg.html
+    pub fn short_alias(mut self, name: char) -> Self {
+        if name == '-' {
+            panic!("short alias name cannot be `-`");
         }
+
+        self.short_aliases.push((name, false));
         self
     }
 
@@ -386,12 +341,37 @@ impl<'help> Arg<'help> {
     /// ```
     /// [`Arg`]: ./struct.Arg.html
     pub fn aliases(mut self, names: &[&'help str]) -> Self {
-        if let Some(ref mut als) = self.aliases {
-            for n in names {
-                als.push((n, false));
+        self.aliases.extend(names.iter().map(|&x| (x, false)));
+        self
+    }
+
+    /// Allows adding [`Arg`] aliases, which function as "hidden" arguments that
+    /// automatically dispatch as if this argument was used. This is more efficient, and easier
+    /// than creating multiple hidden subcommands as one only needs to check for the existence of
+    /// this command, and not all variants.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use clap::{App, Arg};
+    /// let m = App::new("prog")
+    ///             .arg(Arg::with_name("test")
+    ///                     .short('t')
+    ///                     .short_aliases(&['e', 's'])
+    ///                     .help("the file to add")
+    ///                     .required(false))
+    ///             .get_matches_from(vec![
+    ///                 "prog", "-s"
+    ///             ]);
+    /// assert!(m.is_present("test"));
+    /// ```
+    /// [`Arg`]: ./struct.Arg.html
+    pub fn short_aliases(mut self, names: &[char]) -> Self {
+        for s in names {
+            if s == &'-' {
+                panic!("short alias name cannot be `-`");
             }
-        } else {
-            self.aliases = Some(names.iter().map(|&x| (x, false)).collect());
+            self.short_aliases.push((*s, false));
         }
         self
     }
@@ -417,11 +397,36 @@ impl<'help> Arg<'help> {
     /// [`Arg`]: ./struct.Arg.html
     /// [`App::alias`]: ./struct.Arg.html#method.alias
     pub fn visible_alias<S: Into<&'help str>>(mut self, name: S) -> Self {
-        if let Some(ref mut als) = self.aliases {
-            als.push((name.into(), true));
-        } else {
-            self.aliases = Some(vec![(name.into(), true)]);
+        self.aliases.push((name.into(), true));
+        self
+    }
+
+    /// Allows adding a [`Arg`] alias that functions exactly like those defined with
+    /// [`Arg::alias`], except that they are visible inside the help message.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use clap::{App, Arg};
+    /// let m = App::new("prog")
+    ///             .arg(Arg::with_name("test")
+    ///                 .long("test")
+    ///                 .visible_short_alias('t')
+    ///                 .takes_value(true))
+    ///        .get_matches_from(vec![
+    ///             "prog", "-t", "coffee"
+    ///         ]);
+    /// assert!(m.is_present("test"));
+    /// assert_eq!(m.value_of("test"), Some("coffee"));
+    /// ```
+    /// [`Arg`]: ./struct.Arg.html
+    /// [`App::alias`]: ./struct.Arg.html#method.short_alias
+    pub fn visible_short_alias(mut self, name: char) -> Self {
+        if name == '-' {
+            panic!("short alias name cannot be `-`");
         }
+
+        self.short_aliases.push((name, true));
         self
     }
 
@@ -444,12 +449,34 @@ impl<'help> Arg<'help> {
     /// [`Arg`]: ./struct.Arg.html
     /// [`App::aliases`]: ./struct.Arg.html#method.aliases
     pub fn visible_aliases(mut self, names: &[&'help str]) -> Self {
-        if let Some(ref mut als) = self.aliases {
-            for n in names {
-                als.push((n, true));
+        self.aliases.extend(names.iter().map(|n| (*n, true)));
+        self
+    }
+
+    /// Allows adding multiple [`Arg`] aliases that functions exactly like those defined
+    /// with [`Arg::aliases`], except that they are visible inside the help message.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use clap::{App, Arg};
+    /// let m = App::new("prog")
+    ///             .arg(Arg::with_name("test")
+    ///                 .long("test")
+    ///                 .visible_short_aliases(&['t', 'e']))
+    ///        .get_matches_from(vec![
+    ///             "prog", "-t"
+    ///         ]);
+    /// assert!(m.is_present("test"));
+    /// ```
+    /// [`Arg`]: ./struct.Arg.html
+    /// [`App::aliases`]: ./struct.Arg.html#method.short_aliases
+    pub fn visible_short_aliases(mut self, names: &[char]) -> Self {
+        for n in names {
+            if n == &'-' {
+                panic!("short alias name cannot be `-`");
             }
-        } else {
-            self.aliases = Some(names.iter().map(|n| (*n, true)).collect::<Vec<_>>());
+            self.short_aliases.push((*n, true));
         }
         self
     }
@@ -653,12 +680,7 @@ impl<'help> Arg<'help> {
     /// [`Arg::required`]: ./struct.Arg.html#method.required
     /// [`Arg::required_unless(name)`]: ./struct.Arg.html#method.required_unless
     pub fn required_unless<T: Key>(mut self, arg_id: T) -> Self {
-        let id = arg_id.into();
-        if let Some(ref mut vec) = self.r_unless {
-            vec.push(id);
-        } else {
-            self.r_unless = Some(vec![id]);
-        }
+        self.r_unless.push(arg_id.into());
         self
     }
 
@@ -726,13 +748,7 @@ impl<'help> Arg<'help> {
     /// [`Arg::required_unless_one`]: ./struct.Arg.html#method.required_unless_one
     /// [`Arg::required_unless_all(names)`]: ./struct.Arg.html#method.required_unless_all
     pub fn required_unless_all(mut self, names: &[&str]) -> Self {
-        if let Some(ref mut vec) = self.r_unless {
-            for s in names {
-                vec.push(s.into());
-            }
-        } else {
-            self.r_unless = Some(names.iter().map(Into::into).collect());
-        }
+        self.r_unless.extend(names.iter().map(Id::from));
         self.setting(ArgSettings::RequiredUnlessAll)
     }
 
@@ -801,13 +817,7 @@ impl<'help> Arg<'help> {
     /// [`Arg::required_unless_one(names)`]: ./struct.Arg.html#method.required_unless_one
     /// [`Arg::required_unless_all`]: ./struct.Arg.html#method.required_unless_all
     pub fn required_unless_one(mut self, names: &[&str]) -> Self {
-        if let Some(ref mut vec) = self.r_unless {
-            for s in names {
-                vec.push(s.into());
-            }
-        } else {
-            self.r_unless = Some(names.iter().map(Into::into).collect());
-        }
+        self.r_unless.extend(names.iter().map(Id::from));
         self
     }
 
@@ -857,12 +867,7 @@ impl<'help> Arg<'help> {
     /// [`Arg::exclusive(true)`]: ./struct.Arg.html#method.exclusive
 
     pub fn conflicts_with<T: Key>(mut self, arg_id: T) -> Self {
-        let name = arg_id.into();
-        if let Some(ref mut vec) = self.blacklist {
-            vec.push(name);
-        } else {
-            self.blacklist = Some(vec![name]);
-        }
+        self.blacklist.push(arg_id.into());
         self
     }
 
@@ -912,13 +917,7 @@ impl<'help> Arg<'help> {
     /// [`Arg::exclusive(true)`]: ./struct.Arg.html#method.exclusive
 
     pub fn conflicts_with_all(mut self, names: &[&str]) -> Self {
-        if let Some(ref mut vec) = self.blacklist {
-            for s in names {
-                vec.push(s.into());
-            }
-        } else {
-            self.blacklist = Some(names.iter().map(Into::into).collect());
-        }
+        self.blacklist.extend(names.iter().map(Id::from));
         self
     }
 
@@ -1069,12 +1068,7 @@ impl<'help> Arg<'help> {
     /// [`Multiple*`]: ./enum.ArgSettings.html#variant.MultipleValues
     /// [`UseValueDelimiter`]: ./enum.ArgSettings.html#variant.UseValueDelimiter
     pub fn overrides_with<T: Key>(mut self, arg_id: T) -> Self {
-        let name = arg_id.into();
-        if let Some(ref mut vec) = self.overrides {
-            vec.push(name);
-        } else {
-            self.overrides = Some(vec![name]);
-        }
+        self.overrides.push(arg_id.into());
         self
     }
 
@@ -1106,13 +1100,7 @@ impl<'help> Arg<'help> {
     /// assert!(!m.is_present("flag"));
     /// ```
     pub fn overrides_with_all<T: Key>(mut self, names: &[T]) -> Self {
-        if let Some(ref mut vec) = self.overrides {
-            for s in names {
-                vec.push(s.into());
-            }
-        } else {
-            self.overrides = Some(names.iter().map(Into::into).collect());
-        }
+        self.overrides.extend(names.iter().map(Id::from));
         self
     }
 
@@ -1172,12 +1160,7 @@ impl<'help> Arg<'help> {
     /// [Conflicting]: ./struct.Arg.html#method.conflicts_with
     /// [override]: ./struct.Arg.html#method.overrides_with
     pub fn requires<T: Key>(mut self, arg_id: T) -> Self {
-        let arg = arg_id.into();
-        if let Some(ref mut vec) = self.requires {
-            vec.push((None, arg));
-        } else {
-            self.requires = Some(vec![(None, arg)]);
-        }
+        self.requires.push((None, arg_id.into()));
         self
     }
 
@@ -1241,12 +1224,7 @@ impl<'help> Arg<'help> {
     /// [Conflicting]: ./struct.Arg.html#method.conflicts_with
     /// [override]: ./struct.Arg.html#method.overrides_with
     pub fn requires_if<T: Key>(mut self, val: &'help str, arg_id: T) -> Self {
-        let arg = arg_id.into();
-        if let Some(ref mut vec) = self.requires {
-            vec.push((Some(val), arg));
-        } else {
-            self.requires = Some(vec![(Some(val), arg)]);
-        }
+        self.requires.push((Some(val), arg_id.into()));
         self
     }
 
@@ -1302,17 +1280,8 @@ impl<'help> Arg<'help> {
     /// [Conflicting]: ./struct.Arg.html#method.conflicts_with
     /// [override]: ./struct.Arg.html#method.overrides_with
     pub fn requires_ifs<T: Key>(mut self, ifs: &[(&'help str, T)]) -> Self {
-        if let Some(ref mut vec) = self.requires {
-            for (val, arg) in ifs {
-                vec.push((Some(val), arg.into()));
-            }
-        } else {
-            let mut vec = vec![];
-            for (val, arg) in ifs {
-                vec.push((Some(*val), arg.into()));
-            }
-            self.requires = Some(vec);
-        }
+        self.requires
+            .extend(ifs.iter().map(|(val, arg)| (Some(*val), Id::from(arg))));
         self
     }
 
@@ -1380,12 +1349,7 @@ impl<'help> Arg<'help> {
     /// [Conflicting]: ./struct.Arg.html#method.conflicts_with
     /// [required]: ./struct.Arg.html#method.required
     pub fn required_if<T: Key>(mut self, arg_id: T, val: &'help str) -> Self {
-        let arg = arg_id.into();
-        if let Some(ref mut vec) = self.r_ifs {
-            vec.push((arg, val));
-        } else {
-            self.r_ifs = Some(vec![(arg, val)]);
-        }
+        self.r_ifs.push((arg_id.into(), val));
         self
     }
 
@@ -1470,17 +1434,8 @@ impl<'help> Arg<'help> {
     /// [Conflicting]: ./struct.Arg.html#method.conflicts_with
     /// [required]: ./struct.Arg.html#method.required
     pub fn required_ifs<T: Key>(mut self, ifs: &[(T, &'help str)]) -> Self {
-        if let Some(ref mut vec) = self.r_ifs {
-            for (id, val) in ifs {
-                vec.push((Id::from_ref(id), *val));
-            }
-        } else {
-            let mut vec = vec![];
-            for (id, val) in ifs {
-                vec.push((Id::from_ref(id), *val));
-            }
-            self.r_ifs = Some(vec);
-        }
+        self.r_ifs
+            .extend(ifs.iter().map(|(id, val)| (Id::from_ref(id), *val)));
         self
     }
 
@@ -1547,13 +1502,7 @@ impl<'help> Arg<'help> {
     /// [override]: ./struct.Arg.html#method.overrides_with
     /// [`Arg::requires_all(&[arg, arg2])`]: ./struct.Arg.html#method.requires_all
     pub fn requires_all<T: Key>(mut self, names: &[T]) -> Self {
-        if let Some(ref mut vec) = self.requires {
-            for s in names {
-                vec.push((None, s.into()));
-            }
-        } else {
-            self.requires = Some(names.iter().map(|s| (None, s.into())).collect());
-        }
+        self.requires.extend(names.iter().map(|s| (None, s.into())));
         self
     }
 
@@ -1711,13 +1660,7 @@ impl<'help> Arg<'help> {
     /// [positional arguments]: ./struct.Arg.html#method.index
     pub fn possible_values(mut self, names: &[&'help str]) -> Self {
         self.set_mut(ArgSettings::TakesValue);
-        if let Some(ref mut vec) = self.possible_vals {
-            for s in names {
-                vec.push(s);
-            }
-        } else {
-            self.possible_vals = Some(names.to_vec());
-        }
+        self.possible_vals.extend(names);
         self
     }
 
@@ -1776,11 +1719,7 @@ impl<'help> Arg<'help> {
     /// [positional arguments]: ./struct.Arg.html#method.index
     pub fn possible_value(mut self, name: &'help str) -> Self {
         self.set_mut(ArgSettings::TakesValue);
-        if let Some(ref mut vec) = self.possible_vals {
-            vec.push(name);
-        } else {
-            self.possible_vals = Some(vec![name]);
-        }
+        self.possible_vals.push(name);
         self
     }
 
@@ -1815,12 +1754,7 @@ impl<'help> Arg<'help> {
     /// ```
     /// [`ArgGroup`]: ./struct.ArgGroup.html
     pub fn group<T: Key>(mut self, group_id: T) -> Self {
-        let name = group_id.into();
-        if let Some(ref mut vec) = self.groups {
-            vec.push(name);
-        } else {
-            self.groups = Some(vec![name]);
-        }
+        self.groups.push(group_id.into());
         self
     }
 
@@ -1856,13 +1790,7 @@ impl<'help> Arg<'help> {
     /// ```
     /// [`ArgGroup`]: ./struct.ArgGroup.html
     pub fn groups<T: Key>(mut self, group_ids: &[T]) -> Self {
-        if let Some(ref mut vec) = self.groups {
-            for s in group_ids {
-                vec.push(s.into());
-            }
-        } else {
-            self.groups = Some(group_ids.iter().map(Into::into).collect());
-        }
+        self.groups.extend(group_ids.iter().map(Id::from));
         self
     }
 
@@ -2222,19 +2150,13 @@ impl<'help> Arg<'help> {
             self.unset_mut(ArgSettings::ValueDelimiterNotSet);
             self.set_mut(ArgSettings::UseValueDelimiter);
         }
-        if let Some(ref mut vals) = self.val_names {
-            let mut l = vals.len();
-            for s in names {
-                vals.insert(l, s);
-                l += 1;
-            }
-        } else {
-            let mut vm = VecMap::new();
-            for (i, n) in names.iter().enumerate() {
-                vm.insert(i, *n);
-            }
-            self.val_names = Some(vm);
+
+        let mut i = self.val_names.len();
+        for s in names {
+            self.val_names.insert(i, s);
+            i += 1;
         }
+
         self
     }
 
@@ -2286,14 +2208,8 @@ impl<'help> Arg<'help> {
     /// [`Arg::takes_value(true)`]: ./struct.Arg.html#method.takes_value
     pub fn value_name(mut self, name: &'help str) -> Self {
         self.set_mut(ArgSettings::TakesValue);
-        if let Some(ref mut vals) = self.val_names {
-            let l = vals.len();
-            vals.insert(l, name);
-        } else {
-            let mut vm = VecMap::new();
-            vm.insert(0, name);
-            self.val_names = Some(vm);
-        }
+        let l = self.val_names.len();
+        self.val_names.insert(l, name);
         self
     }
 
@@ -2389,7 +2305,7 @@ impl<'help> Arg<'help> {
     #[inline]
     pub fn default_values_os(mut self, vals: &[&'help OsStr]) -> Self {
         self.set_mut(ArgSettings::TakesValue);
-        self.default_vals = Some(vals.to_vec());
+        self.default_vals = vals.to_vec();
         self
     }
 
@@ -2508,16 +2424,10 @@ impl<'help> Arg<'help> {
         val: Option<&'help OsStr>,
         default: &'help OsStr,
     ) -> Self {
-        let arg = arg_id.into();
         self.set_mut(ArgSettings::TakesValue);
-        if let Some(ref mut vm) = self.default_vals_ifs {
-            let l = vm.len();
-            vm.insert(l, (arg, val, default));
-        } else {
-            let mut vm = VecMap::new();
-            vm.insert(0, (arg, val, default));
-            self.default_vals_ifs = Some(vm);
-        }
+        let l = self.default_vals_ifs.len();
+        self.default_vals_ifs
+            .insert(l, (arg_id.into(), val, default));
         self
     }
 
@@ -4136,12 +4046,8 @@ impl<'help> Arg<'help> {
                 self.set_mut(ArgSettings::MultipleValues);
                 self.set_mut(ArgSettings::MultipleOccurrences);
             }
-        } else if self.is_set(ArgSettings::TakesValue) {
-            if let Some(ref vec) = self.val_names {
-                if vec.len() > 1 {
-                    self.num_vals = Some(vec.len() as u64);
-                }
-            }
+        } else if self.is_set(ArgSettings::TakesValue) && self.val_names.len() > 1 {
+            self.num_vals = Some(self.val_names.len() as u64);
         }
     }
 
@@ -4167,10 +4073,8 @@ impl<'help> Arg<'help> {
 
     // Used for positionals when printing
     pub(crate) fn multiple_str(&self) -> &str {
-        let mult_vals = self
-            .val_names
-            .as_ref()
-            .map_or(true, |names| names.len() < 2);
+        // FIXME: This should probably be > 1
+        let mult_vals = self.val_names.len() < 2;
         if (self.is_set(ArgSettings::MultipleValues)
             || self.is_set(ArgSettings::MultipleOccurrences))
             && mult_vals
@@ -4190,19 +4094,19 @@ impl<'help> Arg<'help> {
         } else {
             ' '
         });
-        if let Some(ref names) = self.val_names {
-            debug!("Arg::name_no_brackets: val_names={:#?}", names);
+        if !self.val_names.is_empty() {
+            debug!("Arg::name_no_brackets: val_names={:#?}", self.val_names);
 
-            if names.len() > 1 {
+            if self.val_names.len() > 1 {
                 Cow::Owned(
-                    names
+                    self.val_names
                         .values()
                         .map(|n| format!("<{}>", n))
                         .collect::<Vec<_>>()
                         .join(&*delim),
                 )
             } else {
-                Cow::Borrowed(names.values().next().expect(INTERNAL_ERROR_MSG))
+                Cow::Borrowed(self.val_names.values().next().expect(INTERNAL_ERROR_MSG))
             }
         } else {
             debug!("Arg::name_no_brackets: just name");
@@ -4216,13 +4120,96 @@ impl<'a> Arg<'a> {
         debug!("Arg::_debug_asserts:{}", self.name);
 
         // Self conflict
-        if let Some(vec) = &self.blacklist {
-            assert!(
-                !vec.iter().any(|x| *x == self.id),
-                "Argument '{}' cannot conflict with itself",
-                self.name,
-            );
+        // TODO: this check should be recursive
+        assert!(
+            !self.blacklist.iter().any(|x| *x == self.id),
+            "Argument '{}' cannot conflict with itself",
+            self.name,
+        );
+    }
+}
+
+#[cfg(feature = "yaml")]
+impl<'a> From<&'a Yaml> for Arg<'a> {
+    /// Creates a new instance of [`Arg`] from a .yml (YAML) file.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use clap::{Arg, load_yaml};
+    /// let yml = load_yaml!("arg.yml");
+    /// let arg = Arg::from(yml);
+    /// ```
+    /// [`Arg`]: ./struct.Arg.html
+    #[allow(clippy::cognitive_complexity)]
+    fn from(y: &'a Yaml) -> Self {
+        let y = y.as_hash().unwrap();
+        // We WANT this to panic on error...so expect() is good.
+        let name_yml = y.keys().next().unwrap();
+        let name_str = name_yml.as_str().unwrap();
+        let mut a = Arg::with_name(name_str);
+        let arg_settings = y.get(name_yml).unwrap().as_hash().unwrap();
+
+        for (k, v) in arg_settings.iter() {
+            a = match k.as_str().unwrap() {
+                "short" => yaml_to_char!(a, v, short),
+                "long" => yaml_to_str!(a, v, long),
+                "aliases" => yaml_vec_or_str!(v, a, alias),
+                "short_aliases" => yaml_to_chars!(a, v, short_aliases),
+                "about" => yaml_to_str!(a, v, about),
+                "long_about" => yaml_to_str!(a, v, long_about),
+                "help" => yaml_to_str!(a, v, about),
+                "long_help" => yaml_to_str!(a, v, long_about),
+                "required" => yaml_to_bool!(a, v, required),
+                "required_if" => yaml_tuple2!(a, v, required_if),
+                "required_ifs" => yaml_tuple2!(a, v, required_if),
+                "takes_value" => yaml_to_bool!(a, v, takes_value),
+                "index" => yaml_to_u64!(a, v, index),
+                "global" => yaml_to_bool!(a, v, global),
+                "multiple" => yaml_to_bool!(a, v, multiple),
+                "hidden" => yaml_to_bool!(a, v, hidden),
+                "next_line_help" => yaml_to_bool!(a, v, next_line_help),
+                "group" => yaml_to_str!(a, v, group),
+                "number_of_values" => yaml_to_u64!(a, v, number_of_values),
+                "max_values" => yaml_to_u64!(a, v, max_values),
+                "min_values" => yaml_to_u64!(a, v, min_values),
+                "value_name" => yaml_to_str!(a, v, value_name),
+                "use_delimiter" => yaml_to_bool!(a, v, use_delimiter),
+                "allow_hyphen_values" => yaml_to_bool!(a, v, allow_hyphen_values),
+                "require_equals" => yaml_to_bool!(a, v, require_equals),
+                "require_delimiter" => yaml_to_bool!(a, v, require_delimiter),
+                "value_delimiter" => yaml_to_str!(a, v, value_delimiter),
+                "required_unless" => yaml_to_str!(a, v, required_unless),
+                "display_order" => yaml_to_usize!(a, v, display_order),
+                "default_value" => yaml_to_str!(a, v, default_value),
+                "default_value_if" => yaml_tuple3!(a, v, default_value_if),
+                "default_value_ifs" => yaml_tuple3!(a, v, default_value_if),
+                "env" => yaml_to_str!(a, v, env),
+                "value_names" => yaml_vec_or_str!(v, a, value_name),
+                "groups" => yaml_vec_or_str!(v, a, group),
+                "requires" => yaml_vec_or_str!(v, a, requires),
+                "requires_if" => yaml_tuple2!(a, v, requires_if),
+                "requires_ifs" => yaml_tuple2!(a, v, requires_if),
+                "conflicts_with" => yaml_vec_or_str!(v, a, conflicts_with),
+                "exclusive" => yaml_to_bool!(a, v, exclusive),
+                "hide_default_value" => yaml_to_bool!(a, v, hide_default_value),
+                "overrides_with" => yaml_vec_or_str!(v, a, overrides_with),
+                "possible_values" => yaml_vec_or_str!(v, a, possible_value),
+                "case_insensitive" => yaml_to_bool!(a, v, case_insensitive),
+                "required_unless_one" => yaml_vec_or_str!(v, a, required_unless),
+                "required_unless_all" => {
+                    a = yaml_vec_or_str!(v, a, required_unless);
+                    a.set_mut(ArgSettings::RequiredUnlessAll);
+                    a
+                }
+                s => panic!(
+                    "Unknown Arg setting '{}' in YAML file for arg '{}'",
+                    s, name_str
+                ),
+            }
         }
+
+        a
     }
 }
 
@@ -4254,11 +4241,11 @@ impl<'help> Display for Arg<'help> {
             } else {
                 ' '
             });
-            if let Some(ref names) = self.val_names {
+            if !self.val_names.is_empty() {
                 write!(
                     f,
                     "{}",
-                    names
+                    self.val_names
                         .values()
                         .map(|n| format!("<{}>", n))
                         .collect::<Vec<_>>()
@@ -4267,10 +4254,7 @@ impl<'help> Display for Arg<'help> {
             } else {
                 write!(f, "<{}>", self.name)?;
             }
-            if self.settings.is_set(ArgSettings::MultipleValues)
-                && (self.val_names.is_none()
-                    || (self.val_names.is_some() && self.val_names.as_ref().unwrap().len() == 1))
-            {
+            if self.settings.is_set(ArgSettings::MultipleValues) && self.val_names.len() < 2 {
                 write!(f, "...")?;
             }
             return Ok(());
@@ -4302,15 +4286,15 @@ impl<'help> Display for Arg<'help> {
         };
 
         // Write the values such as <name1> <name2>
-        if let Some(ref vec) = self.val_names {
-            let mut it = vec.iter().peekable();
+        if !self.val_names.is_empty() {
+            let mut it = self.val_names.iter().peekable();
             while let Some((_, val)) = it.next() {
                 write!(f, "<{}>", val)?;
                 if it.peek().is_some() {
                     write!(f, "{}", delim)?;
                 }
             }
-            let num = vec.len();
+            let num = self.val_names.len();
             if self.is_set(ArgSettings::MultipleValues) && num == 1 {
                 write!(f, "...")?;
             }
@@ -4363,10 +4347,10 @@ impl<'help> fmt::Debug for Arg<'help> {
             "Arg {{ id: {:X?}, name: {:?}, help: {:?}, long_help: {:?}, conflicts_with: {:?}, \
              settings: {:?}, required_unless: {:?}, overrides_with: {:?}, groups: {:?}, \
              requires: {:?}, requires_ifs: {:?}, short: {:?}, index: {:?}, long: {:?}, \
-             aliases: {:?}, possible_values: {:?}, value_names: {:?}, number_of_values: {:?}, \
-             max_values: {:?}, min_values: {:?}, value_delimiter: {:?}, default_value_ifs: {:?}, \
-             value_terminator: {:?}, display_order: {:?}, env: {:?}, unified_ord: {:?}, \
-             default_value: {:?}, validator: {}, validator_os: {} \
+             aliases: {:?}, short_aliases: {:?}, possible_values: {:?}, value_names: {:?}, \
+             number_of_values: {:?}, max_values: {:?}, min_values: {:?}, value_delimiter: {:?}, \
+             default_value_ifs: {:?}, value_terminator: {:?}, display_order: {:?}, env: {:?}, \
+             unified_ord: {:?}, default_value: {:?}, validator: {}, validator_os: {} \
              }}",
             self.id,
             self.name,
@@ -4383,6 +4367,7 @@ impl<'help> fmt::Debug for Arg<'help> {
             self.index,
             self.long,
             self.aliases,
+            self.short_aliases,
             self.possible_vals,
             self.val_names,
             self.num_vals,
@@ -4426,7 +4411,7 @@ mod test {
     fn flag_display_single_alias() {
         let mut f = Arg::with_name("flg");
         f.long = Some("flag");
-        f.aliases = Some(vec![("als", true)]);
+        f.aliases = vec![("als", true)];
 
         assert_eq!(&*format!("{}", f), "--flag")
     }
@@ -4435,13 +4420,30 @@ mod test {
     fn flag_display_multiple_aliases() {
         let mut f = Arg::with_name("flg");
         f.short = Some('f');
-        f.aliases = Some(vec![
+        f.aliases = vec![
             ("alias_not_visible", false),
             ("f2", true),
             ("f3", true),
             ("f4", true),
-        ]);
+        ];
         assert_eq!(&*format!("{}", f), "-f");
+    }
+
+    #[test]
+    fn flag_display_single_short_alias() {
+        let mut f = Arg::with_name("flg");
+        f.short = Some('a');
+        f.short_aliases = vec![('b', true)];
+
+        assert_eq!(&*format!("{}", f), "-a")
+    }
+
+    #[test]
+    fn flag_display_multiple_short_aliases() {
+        let mut f = Arg::with_name("flg");
+        f.short = Some('a');
+        f.short_aliases = vec![('b', false), ('c', true), ('d', true), ('e', true)];
+        assert_eq!(&*format!("{}", f), "-a");
     }
 
     // Options
@@ -4496,6 +4498,27 @@ mod test {
         assert_eq!(&*format!("{}", o), "--option <opt>");
     }
 
+    #[test]
+    fn option_display_single_short_alias() {
+        let o = Arg::with_name("opt")
+            .takes_value(true)
+            .short('a')
+            .visible_short_alias('b');
+
+        assert_eq!(&*format!("{}", o), "-a <opt>");
+    }
+
+    #[test]
+    fn option_display_multiple_short_aliases() {
+        let o = Arg::with_name("opt")
+            .short('a')
+            .takes_value(true)
+            .visible_short_aliases(&['b', 'c', 'd'])
+            .short_alias('e');
+
+        assert_eq!(&*format!("{}", o), "-a <opt>");
+    }
+
     // Positionals
 
     #[test]
@@ -4520,7 +4543,7 @@ mod test {
         let mut vm = VecMap::new();
         vm.insert(0, "file1");
         vm.insert(1, "file2");
-        p2.val_names = Some(vm);
+        p2.val_names = vm;
 
         assert_eq!(&*format!("{}", p2), "<file1> <file2>");
     }
@@ -4532,7 +4555,7 @@ mod test {
         let mut vm = VecMap::new();
         vm.insert(0, "file1");
         vm.insert(1, "file2");
-        p2.val_names = Some(vm);
+        p2.val_names = vm;
 
         assert_eq!(&*format!("{}", p2), "<file1> <file2>");
     }

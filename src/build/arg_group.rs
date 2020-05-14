@@ -4,6 +4,9 @@ use std::fmt::{Debug, Formatter, Result};
 // Internal
 use crate::util::{Id, Key};
 
+#[cfg(feature = "yaml")]
+use yaml_rust::Yaml;
+
 /// `ArgGroup`s are a family of related [arguments] and way for you to express, "Any of these
 /// arguments". By placing arguments in a logical group, you can create easier requirement and
 /// exclusion rules instead of having to list each argument individually, or when you want a rule
@@ -43,7 +46,7 @@ use crate::util::{Id, Key};
 ///     .arg("--minor         'auto increase minor'")
 ///     .arg("--patch         'auto increase patch'")
 ///     .group(ArgGroup::with_name("vers")
-///          .args(&["set-ver", "major", "minor","patch"])
+///          .args(&["set-ver", "major", "minor", "patch"])
 ///          .required(true))
 ///     .try_get_matches_from(vec!["app", "--major", "--patch"]);
 /// // Because we used two args in the group it's an error
@@ -80,8 +83,8 @@ pub struct ArgGroup<'a> {
     pub(crate) name: &'a str,
     pub(crate) args: Vec<Id>,
     pub(crate) required: bool,
-    pub(crate) requires: Option<Vec<Id>>,
-    pub(crate) conflicts: Option<Vec<Id>>,
+    pub(crate) requires: Vec<Id>,
+    pub(crate) conflicts: Vec<Id>,
     pub(crate) multiple: bool,
 }
 
@@ -112,21 +115,6 @@ impl<'a> ArgGroup<'a> {
             name: n,
             ..ArgGroup::default()
         }
-    }
-
-    /// Creates a new instance of `ArgGroup` from a .yml (YAML) file.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// # use clap::{ArgGroup, load_yaml};
-    /// let yml = load_yaml!("group.yml");
-    /// let ag = ArgGroup::from_yaml(yml);
-    /// ```
-    #[cfg(feature = "yaml")]
-    #[inline]
-    pub fn from_yaml(y: &'a yaml_rust::Yaml) -> ArgGroup<'a> {
-        ArgGroup::from(y.as_hash().unwrap())
     }
 
     /// Adds an [argument] to this group by name
@@ -299,12 +287,7 @@ impl<'a> ArgGroup<'a> {
     /// [required group]: ./struct.ArgGroup.html#method.required
     /// [argument requirement rules]: ./struct.Arg.html#method.requires
     pub fn requires<T: Key>(mut self, id: T) -> Self {
-        let arg_id = id.into();
-        if let Some(ref mut reqs) = self.requires {
-            reqs.push(arg_id);
-        } else {
-            self.requires = Some(vec![arg_id]);
-        }
+        self.requires.push(id.into());
         self
     }
 
@@ -375,12 +358,7 @@ impl<'a> ArgGroup<'a> {
     /// ```
     /// [argument exclusion rules]: ./struct.Arg.html#method.conflicts_with
     pub fn conflicts_with<T: Key>(mut self, id: T) -> Self {
-        let arg_id = id.into();
-        if let Some(ref mut confs) = self.conflicts {
-            confs.push(arg_id);
-        } else {
-            self.conflicts = Some(vec![arg_id]);
-        }
+        self.conflicts.push(id.into());
         self
     }
 
@@ -435,6 +413,22 @@ impl<'a> Debug for ArgGroup<'a> {
              }}",
             self.name, self.args, self.required, self.requires, self.conflicts
         )
+    }
+}
+
+#[cfg(feature = "yaml")]
+impl<'a> From<&'a Yaml> for ArgGroup<'a> {
+    /// Creates a new instance of `ArgGroup` from a .yml (YAML) file.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use clap::{ArgGroup, load_yaml};
+    /// let yml = load_yaml!("group.yml");
+    /// let ag = ArgGroup::from(yml);
+    /// ```
+    fn from(y: &'a Yaml) -> Self {
+        ArgGroup::from(y.as_hash().unwrap())
     }
 }
 
@@ -527,8 +521,8 @@ mod test {
         let confs = vec!["c1".into(), "c2".into(), "c3".into(), "c4".into()];
 
         assert_eq!(g.args, args);
-        assert_eq!(g.requires, Some(reqs));
-        assert_eq!(g.conflicts, Some(confs));
+        assert_eq!(g.requires, reqs);
+        assert_eq!(g.conflicts, confs);
     }
 
     #[test]
@@ -572,10 +566,7 @@ mod test {
              \trequires: {:?},\n\
              \tconflicts: {:?},\n\
              }}",
-            args,
-            true,
-            Some(reqs),
-            Some(confs)
+            args, true, reqs, confs
         );
         assert_eq!(&*format!("{:?}", g), &*debug_str);
     }
@@ -600,8 +591,8 @@ mod test {
 
         let g2 = ArgGroup::from(&g);
         assert_eq!(g2.args, args);
-        assert_eq!(g2.requires, Some(reqs));
-        assert_eq!(g2.conflicts, Some(confs));
+        assert_eq!(g2.requires, reqs);
+        assert_eq!(g2.conflicts, confs);
     }
 
     #[cfg(feature = "yaml")]
@@ -624,13 +615,13 @@ requires:
 - r3
 - r4";
         let yml = &YamlLoader::load_from_str(g_yaml).expect("failed to load YAML file")[0];
-        let g = ArgGroup::from_yaml(yml);
+        let g = ArgGroup::from(yml);
         let args = vec!["a1".into(), "a4".into(), "a2".into(), "a3".into()];
         let reqs = vec!["r1".into(), "r2".into(), "r3".into(), "r4".into()];
         let confs = vec!["c1".into(), "c2".into(), "c3".into(), "c4".into()];
         assert_eq!(g.args, args);
-        assert_eq!(g.requires, Some(reqs));
-        assert_eq!(g.conflicts, Some(confs));
+        assert_eq!(g.requires, reqs);
+        assert_eq!(g.conflicts, confs);
     }
 }
 

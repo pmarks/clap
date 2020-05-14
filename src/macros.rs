@@ -18,7 +18,7 @@
 /// # use clap::App;
 /// # fn main() {
 /// let yml = load_yaml!("app.yml");
-/// let app = App::from_yaml(yml);
+/// let app = App::from(yml);
 ///
 /// // continued logic goes here, such as `app.get_matches()` etc.
 /// # }
@@ -262,7 +262,8 @@ macro_rules! app_from_crate {
 ///         (author: "Someone E. <someone_else@other.com>")
 ///         (@arg verbose: -v --verbose "Print test information verbosely")
 ///     )
-/// );
+/// )
+/// .get_matches();
 /// # }
 /// ```
 ///
@@ -494,9 +495,13 @@ macro_rules! clap_app {
     (@arg ($arg:expr) $modes:tt $ident:ident[$($target:ident)*] $($tail:tt)*) => {
         $crate::clap_app!{ @arg ($arg $( .$ident(stringify!($target)) )*) $modes $($tail)* }
     };
-    // Inherit builder's functions
-    (@arg ($arg:expr) $modes:tt $ident:ident($($expr:expr)*) $($tail:tt)*) => {
-        $crate::clap_app!{ @arg ($arg.$ident($($expr)*)) $modes $($tail)* }
+    // Inherit builder's functions, e.g. `index(2)`, `requires_if("val", "arg")`
+    (@arg ($arg:expr) $modes:tt $ident:ident($($expr:expr),*) $($tail:tt)*) => {
+        $crate::clap_app!{ @arg ($arg.$ident($($expr),*)) $modes $($tail)* }
+    };
+    // Inherit builder's functions with trailing comma, e.g. `index(2,)`, `requires_if("val", "arg",)`
+    (@arg ($arg:expr) $modes:tt $ident:ident($($expr:expr,)*) $($tail:tt)*) => {
+        $crate::clap_app!{ @arg ($arg.$ident($($expr),*)) $modes $($tail)* }
     };
     // Build a subcommand outside of an app.
     (@subcommand ($name:expr) => $($tail:tt)*) => {
@@ -680,8 +685,8 @@ macro_rules! names {
         $app.get_subcommands().iter().map(|s| &*s.get_name()).chain(
             $app.get_subcommands()
                 .iter()
-                .filter(|s| s.aliases.is_some())
-                .flat_map(|s| s.aliases.as_ref().unwrap().iter().map(|&(n, _)| n)),
+                .filter(|s| !s.aliases.is_empty()) // REFACTOR
+                .flat_map(|s| s.aliases.iter().map(|&(n, _)| n)),
         )
     }};
 }
