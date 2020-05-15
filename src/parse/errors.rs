@@ -850,7 +850,7 @@ impl Error {
             c.none("'")?;
         }
 
-        c.none(&format!(": {}", err))?;
+        c.none(&format!(": {}\n", err))?;
 
         Ok(Error {
             cause: format!(
